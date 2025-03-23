@@ -17,6 +17,8 @@ fi
 
 cd "${env_repo}"
 
+updated_repos=""
+
 # Loop through containers
 for container_path in "${containers_dir}"/*/; do
     full_container_name=$(basename "${container_path}")
@@ -68,6 +70,8 @@ for container_path in "${containers_dir}"/*/; do
     echo "    Commiting ${container_name}/.env.gpg"
     git add "${container_name}/.env.gpg"
     git commit --quiet -m "Update encrypted .env file for ${container_name}"
+
+	updated_repos+="${container_name}, "
 done
 
 if [[ $(git rev-list --count origin/main..HEAD) -eq 0 ]]; then
@@ -75,5 +79,8 @@ if [[ $(git rev-list --count origin/main..HEAD) -eq 0 ]]; then
 else
     echo "Pushing changes to github"
     git push --quiet origin main
+
+	updated_repos=${updated_repos%, }
+	curl --silent --output /dev/null -H "Title: Docker .env files updated" -d "The following repos have had their .env files updated: ${updated_repos}" ${NTFY_URL}/rpi_cron
 fi
 
