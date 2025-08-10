@@ -1,7 +1,15 @@
 #!/bin/bash
 
+set -u
+set -o pipefail
+
 # Read variables in from the .env file
 source ~/rpi-server-scripts/.env
+
+if [[ -z "${GPG_KEY}" ]]; then
+    echo "ERROR: GPG_KEY is not set. Check ~/rpi-server-scripts/.env"
+    exit 1
+fi
 
 # Base Paths
 usr_path="/home/${USER}"
@@ -11,11 +19,19 @@ env_repo="${usr_path}/containers/rpi-server-docker-env-vars"
 # Check env file repo exists. If not clone it
 if [[ ! -d "${env_repo}" ]]; then
     echo "Repository 'rpi-server-docker-env-vars' not found. Cloning it instead."
-    cd "${containers_dir}"
+    cd "${containers_dir}" || exit 1
     git clone --quiet git@github.com:blm34/rpi-server-docker-env-vars.git
 fi
 
-cd "${env_repo}"
+cd "${env_repo}" || exit 1
+
+gpg_key_exists() {
+    local key="$1"
+    if gpg --list-keys --with-colons "${key}" >/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
+}
 
 updated_repos=""
 
@@ -46,32 +62,48 @@ for container_path in "${containers_dir}"/*/; do
 
     # Check if there is an identical, existing encrypted file
     if [[ -f "${encrypted_file}" ]]; then
-	echo "    Existing .env found - checking for changes"
-        mkdir "${env_repo}/tmp"
-	decrypted_file="${env_repo}/tmp/.env" 
-	gpg --decrypt --quiet --recipient "${gpg_key}" --output "${decrypted_file}" "${encrypted_file}"
-	if cmp --quiet "${env_file}" "${decrypted_file}"; then
+        echo "    Existing .env found - checking for changes"
+        if gpg --batch --decrypt --quiet "${encrypted_file}" 2>/dev/null | cmp --quiet "${env_file}" -; then
             echo "    Skipping - no changes found"
-	    rm -r "${env_repo}/tmp"
-	    continue
-	else
-	    echo "    Changes found in .env file"
-	    rm ${encrypted_file}
-	    rm -r "${env_repo}/tmp"
-	fi
-    else
-	echo "    New .env file found"
+            continue
+        else
+            # Check whether gpg failed or files differ
+            gpg_status=${PIPESTATUS[0]}
+            if [[ $gpg_status -ne 0 ]]; then
+                echo "    WARNING: Decryption failed (gpg status ${gpg_status}). Will re-encrypt"
+            else
+                echo "    Changes found in .env file"
+            fi
+            rm "${encrypted_file}"
+        fi
+        echo "    New .env file found"
+    fi
+
+    # Check recipient key exists before trying to encrypt
+    if ! gpg_key_exists "${GPG_KEY}"; then
+        echo "    ERROR: GPG public key '${GPG_KEY}' not found in local keyring."
+        continue
     fi
 
     # Encrypt the .env file
-    gpg --encrypt --quiet --recipient "${gpg_key}"  --output "${encrypted_file}" "${env_file}"
+    if gpg --encrypt --quiet --recipient "${GPG_KEY}"  --output "${encrypted_file}" "${env_file}"; then
+        echo "    Encrypted OK: ${encrypted_file}"
+    else
+        echo "    ERROR: encryption failed for ${env_file}. Skipping commit for ${container_name}."
+    fi
 
-    # Commit the backup to git
-    echo "    Commiting ${container_name}/.env.gpg"
-    git add "${container_name}/.env.gpg"
-    git commit --quiet -m "Update encrypted .env file for ${container_name}"
-
-	updated_repos+="${container_name}, "
+    if [[ -f "${encrypted_file}" ]]; then
+        # Commit the backup to git
+        echo "    Commiting ${container_name}/.env.gpg"
+        git add "${container_name}/.env.gpg"
+        if git commit --quiet -m "Update encrypted .env file for ${container_name}"; then
+            updated_repos+="${container_name}, "
+        else
+            echo "    Nothing to commit or commit failed for ${container_name}"
+        fi
+    else
+        echo "    Unexpected: ${encrypted_file} missing after successful encrypt"
+    fi
 done
 
 if [[ $(git rev-list --count origin/main..HEAD) -eq 0 ]]; then
