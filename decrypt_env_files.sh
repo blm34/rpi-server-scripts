@@ -5,7 +5,7 @@ set -u
 container=${1}
 
 # Base Paths
-usr_path="/home/${USER}"
+usr_path="/home/ben"
 containers_dir="${usr_path}/containers"
 container_dir="${containers_dir}/rpi-server-${container}"
 env_repo="${containers_dir}/rpi-server-docker-env-vars"

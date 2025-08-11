@@ -4,7 +4,7 @@ set -u
 set -o pipefail
 
 # Read variables in from the .env file
-source ~/rpi-server-scripts/.env
+source /home/ben/rpi-server-scripts/.env
 
 if [[ -z "${GPG_KEY}" ]]; then
     echo "ERROR: GPG_KEY is not set. Check ~/rpi-server-scripts/.env"
@@ -12,7 +12,7 @@ if [[ -z "${GPG_KEY}" ]]; then
 fi
 
 # Base Paths
-usr_path="/home/${USER}"
+usr_path="/home/ben"
 containers_dir="${usr_path}/containers"
 env_repo="${usr_path}/containers/rpi-server-docker-env-vars"
 
